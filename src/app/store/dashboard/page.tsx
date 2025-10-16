@@ -8,7 +8,7 @@ import { commandsApi } from '@/services/firebase-api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
-import { Play, Pause, Square, Volume2, RefreshCw, LogOut, Radio } from 'lucide-react';
+import { Play, Pause, Square, Volume2, RefreshCw, LogOut, Radio, Loader2 } from 'lucide-react';
 import type { Device } from '@/types';
 
 export default function StoreDashboardPage() {
@@ -16,6 +16,7 @@ export default function StoreDashboardPage() {
   const [user, setUser] = useState<any>(null);
   const [device, setDevice] = useState<Device | null>(null);
   const [volume, setVolume] = useState(100);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const storedUser = sessionStorage.getItem('storeUser');
@@ -26,20 +27,43 @@ export default function StoreDashboardPage() {
 
     const userData = JSON.parse(storedUser);
     setUser(userData);
+    setLoading(false);
 
     if (userData.deviceId) {
-      const deviceRef = doc(db, 'config', 'devices', 'list', userData.deviceId);
-      const unsubscribe = onSnapshot(deviceRef, (snapshot) => {
-        if (snapshot.exists()) {
-          const deviceData = { id: snapshot.id, ...snapshot.data() } as Device;
-          setDevice(deviceData);
-          if (deviceData.volume) {
-            setVolume(deviceData.volume);
-          }
-        }
-      });
+      // Try both locations for device
+      const checkDevice = async () => {
+        try {
+          // Try config/devices/list first
+          const deviceRef1 = doc(db, 'config', 'devices', 'list', userData.deviceId);
+          const unsubscribe = onSnapshot(deviceRef1, (snapshot) => {
+            if (snapshot.exists()) {
+              const deviceData = { id: snapshot.id, ...snapshot.data() } as Device;
+              setDevice(deviceData);
+              if (deviceData.volume) {
+                setVolume(deviceData.volume);
+              }
+            } else {
+              // Try old location
+              const deviceRef2 = doc(db, 'devices', userData.deviceId);
+              onSnapshot(deviceRef2, (snapshot2) => {
+                if (snapshot2.exists()) {
+                  const deviceData = { id: snapshot2.id, ...snapshot2.data() } as Device;
+                  setDevice(deviceData);
+                  if (deviceData.volume) {
+                    setVolume(deviceData.volume);
+                  }
+                }
+              });
+            }
+          });
 
-      return () => unsubscribe();
+          return unsubscribe;
+        } catch (error) {
+          console.error('Error loading device:', error);
+        }
+      };
+
+      checkDevice();
     }
   }, [router]);
 
@@ -68,7 +92,7 @@ export default function StoreDashboardPage() {
     if (!device) return;
     if (confirm('Är du säker på att du vill starta om enheten?')) {
       await commandsApi.sendSystemUpdate(device.id);
-      alert('✅ Enheten startar om nu. Vänta 30 sekunder...');
+      alert('✅ Enheten startar om nu.');
     }
   };
 
@@ -77,10 +101,23 @@ export default function StoreDashboardPage() {
     router.push('/store');
   };
 
-  if (!device) {
+  if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white"></div>
+        <Loader2 className="h-8 w-8 animate-spin text-white" />
+      </div>
+    );
+  }
+
+  if (!device) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 p-4">
+        <Card>
+          <CardContent className="pt-6 text-center">
+            <p className="mb-4">Ingen enhet tilldelad</p>
+            <Button onClick={handleLogout}>Tillbaka till login</Button>
+          </CardContent>
+        </Card>
       </div>
     );
   }
@@ -165,7 +202,7 @@ export default function StoreDashboardPage() {
                 max="100"
                 value={volume}
                 onChange={(e) => handleVolumeChange(parseInt(e.target.value))}
-                className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                className="w-full"
               />
             </div>
           </CardContent>
@@ -177,22 +214,12 @@ export default function StoreDashboardPage() {
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="flex justify-between text-sm">
-              <span className="text-gray-500">IP-adress</span>
+              <span className="text-gray-500">IP</span>
               <span className="font-mono">{device.ipAddress}</span>
             </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-500">Status</span>
-              <span className={`font-medium ${device.status === 'playing' ? 'text-green-600' : ''}`}>
-                {device.status}
-              </span>
-            </div>
-            <Button
-              onClick={handleRestart}
-              variant="outline"
-              className="w-full"
-            >
+            <Button onClick={handleRestart} variant="outline" className="w-full">
               <RefreshCw className="w-4 h-4 mr-2" />
-              Starta om enhet
+              Starta om
             </Button>
           </CardContent>
         </Card>
