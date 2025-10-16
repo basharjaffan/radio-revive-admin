@@ -22,19 +22,38 @@ export default function StoreLoginPage() {
     setError('');
 
     try {
-      // Check if user exists in Firebase
-      const usersRef = collection(db, 'config', 'users', 'list');
-      const q = query(usersRef, where('email', '==', email.toLowerCase().trim()));
-      const snapshot = await getDocs(q);
+      // Check BOTH locations for users
+      let userDoc = null;
+      let userData = null;
+      let userId = null;
 
-      if (snapshot.empty) {
+      // Try new location first: config/users/list
+      const configUsersRef = collection(db, 'config', 'users', 'list');
+      const configQuery = query(configUsersRef, where('email', '==', email.toLowerCase().trim()));
+      const configSnapshot = await getDocs(configQuery);
+
+      if (!configSnapshot.empty) {
+        userDoc = configSnapshot.docs[0];
+        userData = userDoc.data();
+        userId = userDoc.id;
+      } else {
+        // Try old location: users
+        const usersRef = collection(db, 'users');
+        const usersQuery = query(usersRef, where('email', '==', email.toLowerCase().trim()));
+        const usersSnapshot = await getDocs(usersQuery);
+
+        if (!usersSnapshot.empty) {
+          userDoc = usersSnapshot.docs[0];
+          userData = userDoc.data();
+          userId = userDoc.id;
+        }
+      }
+
+      if (!userData) {
         setError('Email not found. Please contact your administrator.');
         setLoading(false);
         return;
       }
-
-      const userData = snapshot.docs[0].data();
-      const userId = snapshot.docs[0].id;
 
       // Store user session
       sessionStorage.setItem('storeUser', JSON.stringify({
