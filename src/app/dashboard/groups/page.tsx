@@ -2,18 +2,18 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { groupsApi } from '@/services/firebase-api';
+import { groupsApi, devicesApi } from '@/services/firebase-api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Layers, Plus, Music, Upload, X, Loader2 } from 'lucide-react';
-import type { Group } from '@/types';
-import { getStorage, ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
+import type { Group, Device } from '@/types';
 
 export default function GroupsPage() {
   const router = useRouter();
   const [groups, setGroups] = useState<Group[]>([]);
+  const [devices, setDevices] = useState<Device[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -26,52 +26,56 @@ export default function GroupsPage() {
   });
 
   useEffect(() => {
-    const unsubscribe = groupsApi.subscribe((data) => {
-      setGroups(data);
+    const unsubGroups = groupsApi.subscribe(setGroups);
+    const unsubDevices = devicesApi.subscribe((data) => {
+      setDevices(data);
       setLoading(false);
     });
 
-    return () => unsubscribe();
+    return () => {
+      unsubGroups();
+      unsubDevices();
+    };
   }, []);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
+    // Upload to first online device
+    const onlineDevice = devices.find(d => d.status === 'online' || d.status === 'playing');
+    if (!onlineDevice) {
+      alert('❌ Ingen enhet online för att ta emot filer');
+      return;
+    }
+
     setUploading(true);
-    const storage = getStorage();
-    const urls: string[] = [];
+    const uploadedFiles: string[] = [];
 
     try {
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
-        const fileName = `${Date.now()}_${file.name}`;
-        const storageRef = ref(storage, `music/${fileName}`);
-        
-        const uploadTask = uploadBytesResumable(storageRef, file);
+        const formData = new FormData();
+        formData.append('files', file);
 
-        await new Promise((resolve, reject) => {
-          uploadTask.on('state_changed',
-            (snapshot) => {
-              const prog = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-              setUploadProgress(Math.round(prog));
-            },
-            reject,
-            async () => {
-              const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
-              urls.push(downloadURL);
-              resolve(downloadURL);
-            }
-          );
+        const response = await fetch(`http://${onlineDevice.ipAddress}/api/upload-music`, {
+          method: 'POST',
+          body: formData,
         });
+
+        if (response.ok) {
+          const result = await response.json();
+          uploadedFiles.push(...result.files.map((f: any) => f.name));
+          setUploadProgress(Math.round(((i + 1) / files.length) * 100));
+        }
       }
 
       setFormData(prev => ({
         ...prev,
-        musicFiles: [...prev.musicFiles, ...urls]
+        musicFiles: [...prev.musicFiles, ...uploadedFiles]
       }));
-      
-      alert(`✅ ${files.length} filer uppladdade!`);
+
+      alert(`✅ ${files.length} filer uppladdade till enheten!`);
     } catch (error) {
       console.error('Upload error:', error);
       alert('❌ Uppladdning misslyckades');
@@ -81,10 +85,10 @@ export default function GroupsPage() {
     }
   };
 
-  const removeFile = (url: string) => {
+  const removeFile = (filename: string) => {
     setFormData(prev => ({
       ...prev,
-      musicFiles: prev.musicFiles.filter(f => f !== url)
+      musicFiles: prev.musicFiles.filter(f => f !== filename)
     }));
   };
 
@@ -105,17 +109,19 @@ export default function GroupsPage() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-96">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
+        <Loader2 className="h-8 w-8 animate-spin" />
       </div>
     );
   }
+
+  const onlineDevice = devices.find(d => d.status === 'online' || d.status === 'playing');
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold">Groups</h1>
-          <p className="text-gray-500">Manage device groups and music streams</p>
+          <p className="text-gray-500">Manage device groups and music</p>
         </div>
         <Button onClick={() => setShowForm(!showForm)}>
           <Plus className="h-4 w-4 mr-2" />
@@ -142,7 +148,7 @@ export default function GroupsPage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="streamUrl">Stream URL (valfritt)</Label>
+                <Label htmlFor="streamUrl">Stream URL</Label>
                 <Input
                   id="streamUrl"
                   type="url"
@@ -150,62 +156,65 @@ export default function GroupsPage() {
                   onChange={(e) => setFormData({ ...formData, streamUrl: e.target.value })}
                   placeholder="https://stream.example.com/radio"
                 />
-                <p className="text-xs text-gray-500">
-                  Lämna tom om du bara vill använda lokala filer
-                </p>
               </div>
 
-              {/* Music Upload */}
+              {/* Local Music Upload */}
               <div className="space-y-2">
                 <Label>Lokala Musikfiler</Label>
-                <div className="border-2 border-dashed rounded-lg p-6 text-center">
-                  <input
-                    type="file"
-                    id="music-upload"
-                    multiple
-                    accept="audio/mpeg,audio/flac,audio/wav,audio/mp3"
-                    onChange={handleFileUpload}
-                    disabled={uploading}
-                    className="hidden"
-                  />
-                  <label htmlFor="music-upload" className="cursor-pointer">
-                    {uploading ? (
-                      <div className="space-y-2">
-                        <Loader2 className="w-12 h-12 mx-auto animate-spin text-blue-600" />
-                        <p className="text-sm text-gray-600">Laddar upp... {uploadProgress}%</p>
-                      </div>
-                    ) : (
-                      <div className="space-y-2">
-                        <Upload className="w-12 h-12 mx-auto text-gray-400" />
-                        <p className="text-sm text-gray-600">
-                          Klicka för att ladda upp MP3, FLAC eller WAV
-                        </p>
-                        <p className="text-xs text-gray-400">
-                          Filerna sparas lokalt på alla enheter
-                        </p>
-                      </div>
-                    )}
-                  </label>
-                </div>
+                {!onlineDevice ? (
+                  <div className="border border-yellow-500 rounded-lg p-4 bg-yellow-50">
+                    <p className="text-sm text-yellow-800">
+                      ⚠️ Ingen enhet online. Anslut en enhet för att ladda upp filer.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="border-2 border-dashed rounded-lg p-6 text-center">
+                    <input
+                      type="file"
+                      id="music-upload"
+                      multiple
+                      accept="audio/mpeg,audio/flac,audio/wav"
+                      onChange={handleFileUpload}
+                      disabled={uploading}
+                      className="hidden"
+                    />
+                    <label htmlFor="music-upload" className="cursor-pointer">
+                      {uploading ? (
+                        <div className="space-y-2">
+                          <Loader2 className="w-12 h-12 mx-auto animate-spin text-blue-600" />
+                          <p className="text-sm text-gray-600">Laddar upp... {uploadProgress}%</p>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          <Upload className="w-12 h-12 mx-auto text-gray-400" />
+                          <p className="text-sm text-gray-600">
+                            Ladda upp MP3/FLAC/WAV till {onlineDevice.name}
+                          </p>
+                          <p className="text-xs text-gray-400">
+                            Filerna sparas lokalt på enheten
+                          </p>
+                        </div>
+                      )}
+                    </label>
+                  </div>
+                )}
 
                 {formData.musicFiles.length > 0 && (
                   <div className="mt-4 space-y-2">
                     <p className="text-sm font-medium">
                       Uppladdade filer ({formData.musicFiles.length})
                     </p>
-                    {formData.musicFiles.map((url, index) => (
+                    {formData.musicFiles.map((filename, index) => (
                       <div key={index} className="flex items-center justify-between p-2 bg-gray-50 rounded">
                         <div className="flex items-center gap-2">
                           <Music className="w-4 h-4 text-blue-600" />
-                          <span className="text-sm truncate max-w-xs">
-                            {decodeURIComponent(url.split('/').pop()?.split('?')[0] || '')}
-                          </span>
+                          <span className="text-sm">{filename}</span>
                         </div>
                         <Button
                           type="button"
                           variant="ghost"
                           size="sm"
-                          onClick={() => removeFile(url)}
+                          onClick={() => removeFile(filename)}
                         >
                           <X className="w-4 h-4" />
                         </Button>
