@@ -24,7 +24,6 @@ import {
   Radio,
   Activity,
   Loader2,
-  Volume2,
   Wifi,
   Save,
   ExternalLink
@@ -40,16 +39,19 @@ export default function DeviceDetailsPage({ params }: { params: Promise<{ id: st
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
 
-  // Settings
   const [selectedGroup, setSelectedGroup] = useState<string>('');
   const [wifiSSID, setWifiSSID] = useState('');
   const [wifiPassword, setWifiPassword] = useState('');
 
   useEffect(() => {
-    const unsubscribeDevice = devicesApi.subscribeToDevice(resolvedParams.id, (data) => {
-      setDevice(data);
-      if (data?.groupId) {
-        setSelectedGroup(data.groupId);
+    // Subscribe to all devices and filter for this one
+    const unsubscribeDevices = devicesApi.subscribe((allDevices) => {
+      const currentDevice = allDevices.find(d => d.id === resolvedParams.id);
+      if (currentDevice) {
+        setDevice(currentDevice);
+        if (currentDevice.groupId) {
+          setSelectedGroup(currentDevice.groupId);
+        }
       }
       setLoading(false);
     });
@@ -57,7 +59,7 @@ export default function DeviceDetailsPage({ params }: { params: Promise<{ id: st
     const unsubscribeGroups = groupsApi.subscribe(setGroups);
 
     return () => {
-      unsubscribeDevice();
+      unsubscribeDevices();
       unsubscribeGroups();
     };
   }, [resolvedParams.id]);
@@ -112,13 +114,11 @@ export default function DeviceDetailsPage({ params }: { params: Promise<{ id: st
     const selectedGroupData = groups.find(g => g.id === selectedGroup);
     
     if (selectedGroupData) {
-      // Update device with new group and stream URL
       await devicesApi.update(device.id, {
         groupId: selectedGroup,
         streamUrl: selectedGroupData.streamUrl,
       });
       
-      // If device is playing, restart with new stream
       if (device.status === 'playing') {
         await commandsApi.send(device.id, 'stop');
         setTimeout(async () => {
@@ -126,7 +126,7 @@ export default function DeviceDetailsPage({ params }: { params: Promise<{ id: st
         }, 1000);
       }
       
-      alert('✅ Grupp uppdaterad! Musik kommer börja spela med ny stream om enheten är aktiv.');
+      alert('✅ Grupp uppdaterad! Musik kommer börja spela med ny stream.');
     }
     
     setUpdating(false);
@@ -140,7 +140,7 @@ export default function DeviceDetailsPage({ params }: { params: Promise<{ id: st
     
     setUpdating(true);
     await commandsApi.sendWifiConfig(device.id, wifiSSID, wifiPassword);
-    alert('✅ WiFi-konfiguration skickad! Enheten kommer att ansluta till det nya nätverket.');
+    alert('✅ WiFi-konfiguration skickad!');
     setUpdating(false);
     setWifiSSID('');
     setWifiPassword('');
@@ -179,7 +179,6 @@ export default function DeviceDetailsPage({ params }: { params: Promise<{ id: st
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex items-center gap-4">
         <Button variant="ghost" onClick={() => router.push('/dashboard/devices')}>
           <ArrowLeft className="h-4 w-4 mr-2" />
@@ -194,7 +193,6 @@ export default function DeviceDetailsPage({ params }: { params: Promise<{ id: st
         </div>
       </div>
 
-      {/* Quick Actions */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -216,17 +214,12 @@ export default function DeviceDetailsPage({ params }: { params: Promise<{ id: st
             Stop
           </Button>
           <Button onClick={handleRestart} variant="outline" disabled={updating}>
-            {updating ? (
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-            ) : (
-              <RefreshCw className="h-4 w-4 mr-2" />
-            )}
-            Restart Device
+            {updating ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+            Restart
           </Button>
         </CardContent>
       </Card>
 
-      {/* Device Information */}
       <Card>
         <CardHeader>
           <CardTitle>Device Information</CardTitle>
@@ -253,21 +246,21 @@ export default function DeviceDetailsPage({ params }: { params: Promise<{ id: st
             </p>
           </div>
           <div>
-            <p className="text-sm text-gray-500">Firmware Version</p>
+            <p className="text-sm text-gray-500">Firmware</p>
             <p className="font-medium">{device.firmwareVersion || 'Unknown'}</p>
           </div>
           <div>
-            <p className="text-sm text-gray-500">WiFi Configured</p>
+            <p className="text-sm text-gray-500">WiFi</p>
             <p className="font-medium">{device.wifiConfigured ? 'Yes' : 'No'}</p>
           </div>
           <div className="md:col-span-2">
-            <p className="text-sm text-gray-500 mb-2">Current Stream URL</p>
+            <p className="text-sm text-gray-500 mb-2">Stream URL</p>
             {device.streamUrl ? (
               <a 
                 href={device.streamUrl} 
                 target="_blank" 
                 rel="noopener noreferrer"
-                className="font-mono text-sm text-blue-600 hover:text-blue-800 hover:underline flex items-center gap-2"
+                className="text-sm text-blue-600 hover:underline flex items-center gap-2"
               >
                 {device.streamUrl}
                 <ExternalLink className="h-4 w-4" />
@@ -279,7 +272,6 @@ export default function DeviceDetailsPage({ params }: { params: Promise<{ id: st
         </CardContent>
       </Card>
 
-      {/* Group Assignment */}
       <Card>
         <CardHeader>
           <CardTitle>Group Assignment</CardTitle>
@@ -301,17 +293,12 @@ export default function DeviceDetailsPage({ params }: { params: Promise<{ id: st
             </Select>
           </div>
           <Button onClick={handleGroupChange} disabled={updating || !selectedGroup}>
-            {updating ? (
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-            ) : (
-              <Save className="h-4 w-4 mr-2" />
-            )}
+            {updating ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
             Save Group
           </Button>
         </CardContent>
       </Card>
 
-      {/* WiFi Configuration */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -321,12 +308,12 @@ export default function DeviceDetailsPage({ params }: { params: Promise<{ id: st
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="ssid">Network Name (SSID)</Label>
+            <Label htmlFor="ssid">SSID</Label>
             <Input
               id="ssid"
               value={wifiSSID}
               onChange={(e) => setWifiSSID(e.target.value)}
-              placeholder="MyNetwork"
+              placeholder="Network Name"
             />
           </div>
           <div className="space-y-2">
@@ -340,32 +327,23 @@ export default function DeviceDetailsPage({ params }: { params: Promise<{ id: st
             />
           </div>
           <Button onClick={handleWifiConfig} disabled={updating || !wifiSSID || !wifiPassword}>
-            {updating ? (
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-            ) : (
-              <Wifi className="h-4 w-4 mr-2" />
-            )}
+            {updating ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Wifi className="h-4 w-4 mr-2" />}
             Configure WiFi
           </Button>
         </CardContent>
       </Card>
 
-      {/* System Actions */}
       <Card>
         <CardHeader>
           <CardTitle>System Actions</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           <Button onClick={handleSystemUpdate} variant="outline" className="w-full" disabled={updating}>
-            {updating ? (
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-            ) : (
-              <Activity className="h-4 w-4 mr-2" />
-            )}
+            {updating ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Activity className="h-4 w-4 mr-2" />}
             Update & Restart System
           </Button>
           <p className="text-sm text-gray-500">
-            This will pull the latest code, update dependencies, and restart the device.
+            Pull latest code, update dependencies, and restart.
           </p>
         </CardContent>
       </Card>
