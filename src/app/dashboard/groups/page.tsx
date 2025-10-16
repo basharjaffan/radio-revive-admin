@@ -1,124 +1,111 @@
 'use client';
 
-import { useState, useMemo } from 'react';
-import { useGroups } from '@/hooks/useGroups';
-import { useDevices } from '@/hooks/useDevices';
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { groupsApi } from '@/services/firebase-api';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Badge } from '@/components/ui/badge';
-import { Layers, Trash2, Edit, ExternalLink, Radio, Loader2, Plus } from 'lucide-react';
+import { Layers, Plus, Music, Upload, X, Loader2 } from 'lucide-react';
+import type { Group } from '@/types';
+import { getStorage, ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 
 export default function GroupsPage() {
-  const { groups, loading: groupsLoading, createGroup, updateGroup, deleteGroup } = useGroups();
-  const { devices, loading: devicesLoading } = useDevices();
-  
-  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
-  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
-  const [editingGroup, setEditingGroup] = useState<any>(null);
-  const [newGroup, setNewGroup] = useState({ name: '', streamUrl: '' });
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [deletingGroupId, setDeletingGroupId] = useState<string | null>(null);
+  const router = useRouter();
+  const [groups, setGroups] = useState<Group[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
 
-  const deviceCountByGroup = useMemo(() => {
-    const counts: Record<string, number> = {};
-    devices.forEach((device) => {
-      if (device.groupId) {
-        counts[device.groupId] = (counts[device.groupId] || 0) + 1;
-      }
+  const [formData, setFormData] = useState({
+    name: '',
+    streamUrl: '',
+    musicFiles: [] as string[],
+  });
+
+  useEffect(() => {
+    const unsubscribe = groupsApi.subscribe((data) => {
+      setGroups(data);
+      setLoading(false);
     });
-    return counts;
-  }, [devices]);
 
-  const getDevicesForGroup = (groupId: string) => {
-    return devices.filter((device) => device.groupId === groupId);
-  };
+    return () => unsubscribe();
+  }, []);
 
-  const handleCreateGroup = async () => {
-    if (!newGroup.name) return;
-    setIsSubmitting(true);
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    setUploading(true);
+    const storage = getStorage();
+    const urls: string[] = [];
+
     try {
-      await createGroup(newGroup.name, newGroup.streamUrl);
-      setIsAddDialogOpen(false);
-      setNewGroup({ name: '', streamUrl: '' });
-    } catch (err) {
-      console.error('Failed to create group:', err);
-      alert('Failed to create group. Please try again.');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const fileName = `${Date.now()}_${file.name}`;
+        const storageRef = ref(storage, `music/${fileName}`);
+        
+        const uploadTask = uploadBytesResumable(storageRef, file);
 
-  const handleEditGroup = async () => {
-    if (!editingGroup || !editingGroup.name) return;
-    setIsSubmitting(true);
-    try {
-      await updateGroup(editingGroup.id, {
-        name: editingGroup.name,
-        streamUrl: editingGroup.streamUrl,
-      });
-      setIsEditDialogOpen(false);
-      setEditingGroup(null);
-    } catch (err) {
-      console.error('Failed to update group:', err);
-      alert('Failed to update group. Please try again.');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const handleDeleteGroup = async (groupId: string) => {
-    const devicesInGroup = deviceCountByGroup[groupId] || 0;
-    if (devicesInGroup > 0) {
-      if (!confirm(`This group has ${devicesInGroup} device(s). Are you sure you want to delete it?`)) {
-        return;
+        await new Promise((resolve, reject) => {
+          uploadTask.on('state_changed',
+            (snapshot) => {
+              const prog = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+              setUploadProgress(Math.round(prog));
+            },
+            reject,
+            async () => {
+              const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
+              urls.push(downloadURL);
+              resolve(downloadURL);
+            }
+          );
+        });
       }
-    } else {
-      if (!confirm('Are you sure you want to delete this group?')) {
-        return;
-      }
-    }
-    setDeletingGroupId(groupId);
-    try {
-      await deleteGroup(groupId);
-    } catch (err) {
-      console.error('Failed to delete group:', err);
-      alert('Failed to delete group. Please try again.');
+
+      setFormData(prev => ({
+        ...prev,
+        musicFiles: [...prev.musicFiles, ...urls]
+      }));
+      
+      alert(`✅ ${files.length} filer uppladdade!`);
+    } catch (error) {
+      console.error('Upload error:', error);
+      alert('❌ Uppladdning misslyckades');
     } finally {
-      setDeletingGroupId(null);
+      setUploading(false);
+      setUploadProgress(0);
     }
   };
 
-  const openEditDialog = (group: any) => {
-    setEditingGroup({
-      id: group.id,
-      name: group.name,
-      streamUrl: group.streamUrl || '',
-    });
-    setIsEditDialogOpen(true);
+  const removeFile = (url: string) => {
+    setFormData(prev => ({
+      ...prev,
+      musicFiles: prev.musicFiles.filter(f => f !== url)
+    }));
   };
 
-  if (groupsLoading || devicesLoading) {
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    try {
+      await groupsApi.create(formData);
+      setFormData({ name: '', streamUrl: '', musicFiles: [] });
+      setShowForm(false);
+      alert('✅ Grupp skapad!');
+    } catch (error) {
+      console.error('Error creating group:', error);
+      alert('❌ Kunde inte skapa grupp');
+    }
+  };
+
+  if (loading) {
     return (
       <div className="flex items-center justify-center h-96">
-        <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
       </div>
     );
   }
@@ -128,231 +115,144 @@ export default function GroupsPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold">Groups</h1>
-          <p className="text-gray-500">Manage device groups and their streams</p>
+          <p className="text-gray-500">Manage device groups and music streams</p>
         </div>
-        <Button onClick={() => setIsAddDialogOpen(true)}>
+        <Button onClick={() => setShowForm(!showForm)}>
           <Plus className="h-4 w-4 mr-2" />
-          Add Group
+          New Group
         </Button>
       </div>
 
-      {groups.length === 0 ? (
+      {showForm && (
         <Card>
-          <CardContent className="pt-6">
-            <div className="text-center py-12">
-              <Layers className="mx-auto h-12 w-12 text-gray-400" />
-              <h3 className="mt-4 text-lg font-medium text-gray-900">No groups yet</h3>
-              <p className="mt-2 text-sm text-gray-500">
-                Create groups to organize your devices and assign streaming URLs.
-              </p>
-              <Button className="mt-6" onClick={() => setIsAddDialogOpen(true)}>
-                <Plus className="h-4 w-4 mr-2" />
-                Create Group
-              </Button>
-            </div>
+          <CardHeader>
+            <CardTitle>Create New Group</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="name">Group Name</Label>
+                <Input
+                  id="name"
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  placeholder="Store Music"
+                  required
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="streamUrl">Stream URL (valfritt)</Label>
+                <Input
+                  id="streamUrl"
+                  type="url"
+                  value={formData.streamUrl}
+                  onChange={(e) => setFormData({ ...formData, streamUrl: e.target.value })}
+                  placeholder="https://stream.example.com/radio"
+                />
+                <p className="text-xs text-gray-500">
+                  Lämna tom om du bara vill använda lokala filer
+                </p>
+              </div>
+
+              {/* Music Upload */}
+              <div className="space-y-2">
+                <Label>Lokala Musikfiler</Label>
+                <div className="border-2 border-dashed rounded-lg p-6 text-center">
+                  <input
+                    type="file"
+                    id="music-upload"
+                    multiple
+                    accept="audio/mpeg,audio/flac,audio/wav,audio/mp3"
+                    onChange={handleFileUpload}
+                    disabled={uploading}
+                    className="hidden"
+                  />
+                  <label htmlFor="music-upload" className="cursor-pointer">
+                    {uploading ? (
+                      <div className="space-y-2">
+                        <Loader2 className="w-12 h-12 mx-auto animate-spin text-blue-600" />
+                        <p className="text-sm text-gray-600">Laddar upp... {uploadProgress}%</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        <Upload className="w-12 h-12 mx-auto text-gray-400" />
+                        <p className="text-sm text-gray-600">
+                          Klicka för att ladda upp MP3, FLAC eller WAV
+                        </p>
+                        <p className="text-xs text-gray-400">
+                          Filerna sparas lokalt på alla enheter
+                        </p>
+                      </div>
+                    )}
+                  </label>
+                </div>
+
+                {formData.musicFiles.length > 0 && (
+                  <div className="mt-4 space-y-2">
+                    <p className="text-sm font-medium">
+                      Uppladdade filer ({formData.musicFiles.length})
+                    </p>
+                    {formData.musicFiles.map((url, index) => (
+                      <div key={index} className="flex items-center justify-between p-2 bg-gray-50 rounded">
+                        <div className="flex items-center gap-2">
+                          <Music className="w-4 h-4 text-blue-600" />
+                          <span className="text-sm truncate max-w-xs">
+                            {decodeURIComponent(url.split('/').pop()?.split('?')[0] || '')}
+                          </span>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => removeFile(url)}
+                        >
+                          <X className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="flex gap-2">
+                <Button type="submit">Create Group</Button>
+                <Button type="button" variant="outline" onClick={() => setShowForm(false)}>
+                  Cancel
+                </Button>
+              </div>
+            </form>
           </CardContent>
         </Card>
-      ) : (
-        <>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {groups.map((group) => {
-              const deviceCount = deviceCountByGroup[group.id] || 0;
-              const groupDevices = getDevicesForGroup(group.id);
-              const onlineCount = groupDevices.filter(d => d.status === 'online' || d.status === 'playing').length;
-
-              return (
-                <Card key={group.id} className="hover:shadow-lg transition-shadow">
-                  <CardHeader>
-                    <div className="flex items-start justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className="h-12 w-12 rounded-lg bg-gradient-to-br from-purple-400 to-blue-500 flex items-center justify-center">
-                          <Layers className="h-6 w-6 text-white" />
-                        </div>
-                        <div>
-                          <CardTitle className="text-lg">{group.name}</CardTitle>
-                          <CardDescription className="text-xs font-mono mt-1">{group.id}</CardDescription>
-                        </div>
-                      </div>
-                    </div>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="text-gray-500">Devices</span>
-                      <div className="flex items-center gap-2">
-                        <Badge variant="outline">
-                          <Radio className="h-3 w-3 mr-1" />
-                          {deviceCount}
-                        </Badge>
-                        {onlineCount > 0 && (
-                          <Badge className="bg-green-100 text-green-800">{onlineCount} online</Badge>
-                        )}
-                      </div>
-                    </div>
-                    <div className="space-y-1">
-                      <span className="text-sm text-gray-500">Stream URL</span>
-                      {group.streamUrl ? (
-                        <div className="flex items-center gap-1 text-sm">
-                          <a href={group.streamUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline truncate">
-                            <span className="truncate">{group.streamUrl}</span>
-                          </a>
-                          <ExternalLink className="h-3 w-3 flex-shrink-0 text-blue-600" />
-                        </div>
-                      ) : (
-                        <span className="text-sm text-gray-400">No stream URL</span>
-                      )}
-                    </div>
-                    <div className="flex gap-2 pt-2">
-                      <Button variant="outline" size="sm" className="flex-1" onClick={() => openEditDialog(group)}>
-                        <Edit className="h-4 w-4 mr-2" />
-                        Edit
-                      </Button>
-                      <Button variant="outline" size="sm" onClick={() => handleDeleteGroup(group.id)} disabled={deletingGroupId === group.id}>
-                        {deletingGroupId === group.id ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <Trash2 className="h-4 w-4 text-red-600" />
-                        )}
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
-              );
-            })}
-          </div>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>All Groups ({groups.length})</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Name</TableHead>
-                      <TableHead>Group ID</TableHead>
-                      <TableHead>Devices</TableHead>
-                      <TableHead>Stream URL</TableHead>
-                      <TableHead className="text-right">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {groups.map((group) => {
-                      const deviceCount = deviceCountByGroup[group.id] || 0;
-                      return (
-                        <TableRow key={group.id}>
-                          <TableCell className="font-medium">
-                            <div className="flex items-center gap-2">
-                              <Layers className="h-4 w-4 text-gray-500" />
-                              {group.name}
-                            </div>
-                          </TableCell>
-                          <TableCell className="font-mono text-sm text-gray-500">{group.id}</TableCell>
-                          <TableCell>
-                            <Badge variant="outline">
-                              <Radio className="h-3 w-3 mr-1" />
-                              {deviceCount} device{deviceCount !== 1 ? 's' : ''}
-                            </Badge>
-                          </TableCell>
-                          <TableCell>
-                            {group.streamUrl ? (
-                              <a href={group.streamUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-blue-600 hover:underline max-w-md truncate">
-                                {group.streamUrl}
-                                <ExternalLink className="h-3 w-3" />
-                              </a>
-                            ) : (
-                              <span className="text-gray-400">No stream URL</span>
-                            )}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            <div className="flex justify-end gap-2">
-                              <Button size="sm" variant="ghost" onClick={() => openEditDialog(group)}>
-                                <Edit className="h-4 w-4" />
-                              </Button>
-                              <Button size="sm" variant="ghost" onClick={() => handleDeleteGroup(group.id)} disabled={deletingGroupId === group.id}>
-                                {deletingGroupId === group.id ? (
-                                  <Loader2 className="h-4 w-4 animate-spin" />
-                                ) : (
-                                  <Trash2 className="h-4 w-4 text-red-600" />
-                                )}
-                              </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              </div>
-            </CardContent>
-          </Card>
-        </>
       )}
 
-      <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Create New Group</DialogTitle>
-            <DialogDescription>Create a group to organize devices and assign streaming URLs.</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label htmlFor="name">Group Name</Label>
-              <Input id="name" placeholder="e.g., Kitchen Radios" value={newGroup.name} onChange={(e) => setNewGroup({ ...newGroup, name: e.target.value })} />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="streamUrl">Stream URL</Label>
-              <Input id="streamUrl" type="url" placeholder="https://stream.example.com/radio" value={newGroup.streamUrl} onChange={(e) => setNewGroup({ ...newGroup, streamUrl: e.target.value })} />
-              <p className="text-xs text-gray-500">Optional: Set a default streaming URL for this group</p>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsAddDialogOpen(false)} disabled={isSubmitting}>Cancel</Button>
-            <Button onClick={handleCreateGroup} disabled={isSubmitting || !newGroup.name}>
-              {isSubmitting ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Creating...
-                </>
-              ) : (
-                'Create Group'
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        {groups.map((group) => (
+          <Card
+            key={group.id}
+            className="cursor-pointer hover:shadow-lg transition-shadow"
+            onClick={() => router.push(`/dashboard/groups/${group.id}`)}
+          >
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Layers className="h-5 w-5" />
+                {group.name}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-gray-500 truncate">
+                {group.streamUrl || 'Lokala filer'}
+              </p>
+              {group.musicFiles && group.musicFiles.length > 0 && (
+                <div className="mt-2 flex items-center gap-1 text-xs text-blue-600">
+                  <Music className="w-3 h-3" />
+                  {group.musicFiles.length} lokala filer
+                </div>
               )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Edit Group</DialogTitle>
-            <DialogDescription>Update group information and streaming URL.</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label htmlFor="edit-name">Group Name</Label>
-              <Input id="edit-name" placeholder="e.g., Kitchen Radios" value={editingGroup?.name || ''} onChange={(e) => setEditingGroup({ ...editingGroup, name: e.target.value })} />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="edit-streamUrl">Stream URL</Label>
-              <Input id="edit-streamUrl" type="url" placeholder="https://stream.example.com/radio" value={editingGroup?.streamUrl || ''} onChange={(e) => setEditingGroup({ ...editingGroup, streamUrl: e.target.value })} />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsEditDialogOpen(false)} disabled={isSubmitting}>Cancel</Button>
-            <Button onClick={handleEditGroup} disabled={isSubmitting || !editingGroup?.name}>
-              {isSubmitting ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Saving...
-                </>
-              ) : (
-                'Save Changes'
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
     </div>
   );
 }
