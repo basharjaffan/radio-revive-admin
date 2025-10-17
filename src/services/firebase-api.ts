@@ -8,7 +8,8 @@ import {
   query,
   orderBy,
   serverTimestamp,
-  getDocs
+  getDocs,
+  deleteField
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import type { Device, Group, User } from '@/types';
@@ -76,7 +77,6 @@ export const groupsApi = {
 // Users API - Läser från BÅDA platserna
 export const usersApi = {
   subscribe: (callback: (users: User[]) => void) => {
-    // Lyssna på config/users/list
     const configUsersRef = collection(db, 'config', 'users', 'list');
     
     const unsubConfig = onSnapshot(configUsersRef, async (configSnapshot) => {
@@ -85,7 +85,6 @@ export const usersApi = {
         ...doc.data()
       })) as User[];
 
-      // Hämta också från gamla /users
       try {
         const oldUsersRef = collection(db, 'users');
         const oldSnapshot = await getDocs(oldUsersRef);
@@ -94,11 +93,9 @@ export const usersApi = {
           ...doc.data()
         })) as User[];
 
-        // Kombinera båda
         const allUsers = [...configUsers, ...oldUsers];
         callback(allUsers);
       } catch (error) {
-        // Om gamla users inte finns, använd bara config
         callback(configUsers);
       }
     });
@@ -108,26 +105,52 @@ export const usersApi = {
 
   create: async (data: Omit<User, 'id'>) => {
     const usersRef = collection(db, 'config', 'users', 'list');
-    await addDoc(usersRef, {
-      ...data,
+    
+    // Remove undefined values
+    const cleanData: any = {
+      name: data.name,
+      email: data.email,
       createdAt: serverTimestamp()
-    });
+    };
+    
+    if (data.deviceId) {
+      cleanData.deviceId = data.deviceId;
+    }
+    
+    await addDoc(usersRef, cleanData);
   },
 
   update: async (userId: string, data: Partial<User>) => {
-    // Uppdatera i båda platserna
+    // Clean data - remove undefined, replace with deleteField
+    const cleanData: any = {};
+    
+    if (data.name !== undefined) {
+      cleanData.name = data.name;
+    }
+    
+    if (data.email !== undefined) {
+      cleanData.email = data.email;
+    }
+    
+    // Handle deviceId specially
+    if (data.deviceId === undefined || data.deviceId === null || data.deviceId === '') {
+      cleanData.deviceId = deleteField();
+    } else {
+      cleanData.deviceId = data.deviceId;
+    }
+    
+    // Try updating in both locations
     try {
       const configUserRef = doc(db, 'config', 'users', 'list', userId);
-      await updateDoc(configUserRef, data);
+      await updateDoc(configUserRef, cleanData);
     } catch (error) {
-      // Om inte finns i config, försök gamla platsen
+      // If not in config, try old location
       const oldUserRef = doc(db, 'users', userId);
-      await updateDoc(oldUserRef, data);
+      await updateDoc(oldUserRef, cleanData);
     }
   },
 
   delete: async (userId: string) => {
-    // Radera från båda platserna
     try {
       const configUserRef = doc(db, 'config', 'users', 'list', userId);
       await deleteDoc(configUserRef);
