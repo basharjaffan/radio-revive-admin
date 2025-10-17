@@ -16,9 +16,18 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
   Play,
   Pause,
-  Power,
   RefreshCw,
   ArrowLeft,
   Radio,
@@ -28,9 +37,6 @@ import {
   Wifi,
   Save,
   ExternalLink,
-  Cpu,
-  HardDrive,
-  Gauge,
   Network
 } from 'lucide-react';
 import type { Device, Group } from '@/types';
@@ -43,6 +49,11 @@ export default function DeviceDetailsPage({ params }: { params: Promise<{ id: st
   const [groups, setGroups] = useState<Group[]>([]);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
+  
+  // Dialog states
+  const [showRestartDialog, setShowRestartDialog] = useState(false);
+  const [showUpdateDialog, setShowUpdateDialog] = useState(false);
+  const [showNetworkDialog, setShowNetworkDialog] = useState(false);
 
   const [selectedGroup, setSelectedGroup] = useState<string>('');
   const [volume, setVolume] = useState(100);
@@ -97,11 +108,6 @@ export default function DeviceDetailsPage({ params }: { params: Promise<{ id: st
     await commandsApi.send(device.id, 'pause');
   };
 
-  const handleStop = async () => {
-    if (!device) return;
-    await commandsApi.send(device.id, 'stop');
-  };
-
   const handleVolumeChange = async (newVolume: number) => {
     if (!device) return;
     setVolume(newVolume);
@@ -109,11 +115,11 @@ export default function DeviceDetailsPage({ params }: { params: Promise<{ id: st
     await devicesApi.update(device.id, { volume: newVolume });
   };
 
-  const handleRestart = async () => {
+  const confirmRestart = async () => {
     if (!device) return;
-    if (!confirm('Är du säker på att du vill starta om enheten?')) return;
     
     setUpdating(true);
+    setShowRestartDialog(false);
     await commandsApi.sendSystemUpdate(device.id);
     alert('✅ Enheten startar om nu. Vänta 30 sekunder...');
     
@@ -123,11 +129,11 @@ export default function DeviceDetailsPage({ params }: { params: Promise<{ id: st
     }, 30000);
   };
 
-  const handleSystemUpdate = async () => {
+  const confirmUpdate = async () => {
     if (!device) return;
-    if (!confirm('Detta kommer uppdatera systemet och starta om enheten. Fortsätt?')) return;
     
     setUpdating(true);
+    setShowUpdateDialog(false);
     await commandsApi.sendSystemUpdate(device.id);
     alert('✅ Uppdatering initierad!');
     
@@ -135,6 +141,29 @@ export default function DeviceDetailsPage({ params }: { params: Promise<{ id: st
       setUpdating(false);
       window.location.reload();
     }, 30000);
+  };
+
+  const confirmNetworkConfig = async () => {
+    if (!device) return;
+    
+    setUpdating(true);
+    setShowNetworkDialog(false);
+    
+    try {
+      await commandsApi.sendNetworkConfig(
+        device.id,
+        networkConfig.ipAddress,
+        networkConfig.gateway,
+        networkConfig.dns1,
+        networkConfig.dns2,
+        networkConfig.interface
+      );
+      alert('✅ Nätverkskonfiguration skickad! Enheten startar om.');
+    } catch (error) {
+      alert('❌ Kunde inte konfigurera nätverk');
+    } finally {
+      setUpdating(false);
+    }
   };
 
   const handleGroupChange = async () => {
@@ -174,35 +203,6 @@ export default function DeviceDetailsPage({ params }: { params: Promise<{ id: st
     setUpdating(false);
     setWifiSSID('');
     setWifiPassword('');
-  };
-
-  const handleNetworkConfig = async () => {
-    if (!device) return;
-    if (!networkConfig.ipAddress || !networkConfig.gateway) {
-      alert('Fyll i IP-adress och Gateway');
-      return;
-    }
-
-    if (!confirm('Detta kommer att ändra nätverksinställningar och starta om enheten. Fortsätt?')) {
-      return;
-    }
-
-    setUpdating(true);
-    try {
-      await commandsApi.sendNetworkConfig(
-        device.id,
-        networkConfig.ipAddress,
-        networkConfig.gateway,
-        networkConfig.dns1,
-        networkConfig.dns2,
-        networkConfig.interface
-      );
-      alert('✅ Nätverkskonfiguration skickad! Enheten startar om.');
-    } catch (error) {
-      alert('❌ Kunde inte konfigurera nätverk');
-    } finally {
-      setUpdating(false);
-    }
   };
 
   const formatLastSeen = (lastSeen: any) => {
@@ -252,7 +252,55 @@ export default function DeviceDetailsPage({ params }: { params: Promise<{ id: st
 
   return (
     <div className="space-y-6">
-      {/* Header with Volume */}
+      {/* Restart Dialog */}
+      <AlertDialog open={showRestartDialog} onOpenChange={setShowRestartDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Starta om enheten?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Enheten kommer att starta om. Detta tar cirka 30 sekunder.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Avbryt</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmRestart}>Starta om</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Update Dialog */}
+      <AlertDialog open={showUpdateDialog} onOpenChange={setShowUpdateDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Uppdatera systemet?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Detta kommer uppdatera systemet och starta om enheten. Fortsätt?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Avbryt</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmUpdate}>Uppdatera</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Network Config Dialog */}
+      <AlertDialog open={showNetworkDialog} onOpenChange={setShowNetworkDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Ändra nätverksinställningar?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Detta kommer att ändra nätverksinställningar och starta om enheten. Fortsätt?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Avbryt</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmNetworkConfig}>Tillämpa</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Header */}
       <div className="flex items-center gap-4">
         <Button variant="ghost" onClick={() => router.push('/dashboard/devices')}>
           <ArrowLeft className="h-4 w-4 mr-2" />
@@ -264,22 +312,6 @@ export default function DeviceDetailsPage({ params }: { params: Promise<{ id: st
             {getStatusBadge()}
           </div>
           <p className="text-gray-500">{device.id}</p>
-        </div>
-        
-        {/* Volume Control - Top Right */}
-        <div className="flex items-center gap-3 bg-white p-4 rounded-lg border shadow-sm min-w-[300px]">
-          <Volume2 className="h-5 w-5 text-gray-600" />
-          <div className="flex-1">
-            <input
-              type="range"
-              min="0"
-              max="100"
-              value={volume}
-              onChange={(e) => handleVolumeChange(parseInt(e.target.value))}
-              className="w-full"
-            />
-          </div>
-          <span className="text-xl font-bold min-w-[50px] text-right">{volume}%</span>
         </div>
       </div>
 
@@ -300,52 +332,101 @@ export default function DeviceDetailsPage({ params }: { params: Promise<{ id: st
             <Pause className="h-4 w-4 mr-2" />
             Pause
           </Button>
-          <Button onClick={handleStop} variant="outline">
-            <Power className="h-4 w-4 mr-2" />
-            Stop
-          </Button>
-          <Button onClick={handleRestart} variant="outline" disabled={updating}>
+          <Button onClick={() => setShowRestartDialog(true)} variant="outline" disabled={updating}>
             {updating ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
             Restart
+          </Button>
+          <Button onClick={() => setShowUpdateDialog(true)} variant="outline" disabled={updating}>
+            {updating ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Activity className="h-4 w-4 mr-2" />}
+            Update System
           </Button>
         </CardContent>
       </Card>
 
-      {/* System Metrics */}
-      <div className="grid gap-4 md:grid-cols-3">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">CPU Usage</CardTitle>
-            <Cpu className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{device.cpuUsage?.toFixed(1) || 0}%</div>
-          </CardContent>
-        </Card>
+      {/* Device Information with Volume */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Device Information</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <div className="grid md:grid-cols-2 gap-4">
+            <div>
+              <p className="text-sm text-gray-500">IP Address</p>
+              <p className="font-medium font-mono">{device.ipAddress || 'N/A'}</p>
+            </div>
+            <div>
+              <p className="text-sm text-gray-500">Last Seen</p>
+              <p className="font-medium">{formatLastSeen(device.lastSeen)}</p>
+            </div>
+            <div>
+              <p className="text-sm text-gray-500">Uptime</p>
+              <p className="font-medium">
+                {device.uptime ? `${Math.floor(device.uptime / 3600)}h ${Math.floor((device.uptime % 3600) / 60)}m` : 'N/A'}
+              </p>
+            </div>
+            <div>
+              <p className="text-sm text-gray-500">Firmware</p>
+              <p className="font-medium font-mono">{device.firmwareVersion || 'Unknown'}</p>
+            </div>
+            <div>
+              <p className="text-sm text-gray-500">CPU Usage</p>
+              <p className="font-medium">{device.cpuUsage?.toFixed(1) || 0}%</p>
+            </div>
+            <div>
+              <p className="text-sm text-gray-500">Memory Usage</p>
+              <p className="font-medium">{device.memoryUsage?.toFixed(1) || 0}%</p>
+            </div>
+            <div>
+              <p className="text-sm text-gray-500">Disk Usage</p>
+              <p className="font-medium">{device.diskUsage || 0}% ({device.diskUsed} / {device.diskTotal})</p>
+            </div>
+            <div>
+              <p className="text-sm text-gray-500">Network</p>
+              <div className="flex gap-2">
+                {device.wifiConnected && <Badge variant="outline">WiFi</Badge>}
+                {device.ethernetConnected && <Badge variant="outline">Ethernet</Badge>}
+                {!device.wifiConnected && !device.ethernetConnected && <span className="text-gray-400">Not connected</span>}
+              </div>
+            </div>
+            <div className="md:col-span-2">
+              <p className="text-sm text-gray-500 mb-2">Stream URL</p>
+              {device.streamUrl ? (
+                <a 
+                  href={device.streamUrl} 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="text-sm text-blue-600 hover:underline flex items-center gap-2"
+                >
+                  {device.streamUrl}
+                  <ExternalLink className="h-4 w-4" />
+                </a>
+              ) : (
+                <p className="font-medium">Not configured</p>
+              )}
+            </div>
+          </div>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">Memory</CardTitle>
-            <Gauge className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{device.memoryUsage?.toFixed(1) || 0}%</div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium">Disk</CardTitle>
-            <HardDrive className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{device.diskUsage || 0}%</div>
-            <p className="text-xs text-muted-foreground">
-              {device.diskUsed} / {device.diskTotal}
-            </p>
-          </CardContent>
-        </Card>
-      </div>
+          <div className="border-t pt-6">
+            <div className="flex items-center gap-4">
+              <Volume2 className="h-5 w-5 text-gray-600" />
+              <div className="flex-1">
+                <div className="flex items-center justify-between mb-2">
+                  <Label>Volume</Label>
+                  <span className="text-2xl font-bold">{volume}%</span>
+                </div>
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  value={volume}
+                  onChange={(e) => handleVolumeChange(parseInt(e.target.value))}
+                  className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                />
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Network Configuration */}
       <Card>
@@ -394,64 +475,22 @@ export default function DeviceDetailsPage({ params }: { params: Promise<{ id: st
               />
             </div>
           </div>
-          <Button onClick={handleNetworkConfig} disabled={updating}>
+          <Button 
+            onClick={() => {
+              if (!networkConfig.ipAddress || !networkConfig.gateway) {
+                alert('Fyll i IP-adress och Gateway');
+                return;
+              }
+              setShowNetworkDialog(true);
+            }} 
+            disabled={updating}
+          >
             {updating ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Network className="h-4 w-4 mr-2" />}
             Apply Network Settings
           </Button>
           <p className="text-xs text-yellow-600">
             ⚠️ Enheten kommer att starta om efter att nätverksinställningarna tillämpats
           </p>
-        </CardContent>
-      </Card>
-
-      {/* Device Information */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Device Information</CardTitle>
-        </CardHeader>
-        <CardContent className="grid md:grid-cols-2 gap-4">
-          <div>
-            <p className="text-sm text-gray-500">IP Address</p>
-            <p className="font-medium font-mono">{device.ipAddress || 'N/A'}</p>
-          </div>
-          <div>
-            <p className="text-sm text-gray-500">Last Seen</p>
-            <p className="font-medium">{formatLastSeen(device.lastSeen)}</p>
-          </div>
-          <div>
-            <p className="text-sm text-gray-500">Uptime</p>
-            <p className="font-medium">
-              {device.uptime ? `${Math.floor(device.uptime / 3600)}h ${Math.floor((device.uptime % 3600) / 60)}m` : 'N/A'}
-            </p>
-          </div>
-          <div>
-            <p className="text-sm text-gray-500">Firmware</p>
-            <p className="font-medium font-mono">{device.firmwareVersion || 'Unknown'}</p>
-          </div>
-          <div>
-            <p className="text-sm text-gray-500">Network</p>
-            <div className="flex gap-2">
-              {device.wifiConnected && <Badge variant="outline">WiFi</Badge>}
-              {device.ethernetConnected && <Badge variant="outline">Ethernet</Badge>}
-              {!device.wifiConnected && !device.ethernetConnected && <span className="text-gray-400">Not connected</span>}
-            </div>
-          </div>
-          <div className="md:col-span-2">
-            <p className="text-sm text-gray-500 mb-2">Stream URL</p>
-            {device.streamUrl ? (
-              <a 
-                href={device.streamUrl} 
-                target="_blank" 
-                rel="noopener noreferrer"
-                className="text-sm text-blue-600 hover:underline flex items-center gap-2"
-              >
-                {device.streamUrl}
-                <ExternalLink className="h-4 w-4" />
-              </a>
-            ) : (
-              <p className="font-medium">Not configured</p>
-            )}
-          </div>
         </CardContent>
       </Card>
 
@@ -515,22 +554,6 @@ export default function DeviceDetailsPage({ params }: { params: Promise<{ id: st
             {updating ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Wifi className="h-4 w-4 mr-2" />}
             Configure WiFi
           </Button>
-        </CardContent>
-      </Card>
-
-      {/* System Actions */}
-      <Card>
-        <CardHeader>
-          <CardTitle>System Actions</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <Button onClick={handleSystemUpdate} variant="outline" className="w-full" disabled={updating}>
-            {updating ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Activity className="h-4 w-4 mr-2" />}
-            Update & Restart System
-          </Button>
-          <p className="text-sm text-gray-500">
-            Pull latest code, update dependencies, and restart.
-          </p>
         </CardContent>
       </Card>
     </div>
