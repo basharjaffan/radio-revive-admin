@@ -16,16 +16,6 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
-import {
   Play,
   Pause,
   RefreshCw,
@@ -49,11 +39,6 @@ export default function DeviceDetailsPage({ params }: { params: Promise<{ id: st
   const [groups, setGroups] = useState<Group[]>([]);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
-  
-  // Dialog states
-  const [showRestartDialog, setShowRestartDialog] = useState(false);
-  const [showUpdateDialog, setShowUpdateDialog] = useState(false);
-  const [showNetworkDialog, setShowNetworkDialog] = useState(false);
 
   const [selectedGroup, setSelectedGroup] = useState<string>('');
   const [volume, setVolume] = useState(100);
@@ -115,11 +100,10 @@ export default function DeviceDetailsPage({ params }: { params: Promise<{ id: st
     await devicesApi.update(device.id, { volume: newVolume });
   };
 
-  const confirmRestart = async () => {
-    if (!device) return;
+  const handleRestart = async () => {
+    if (!device || !confirm('Är du säker på att du vill starta om enheten?')) return;
     
     setUpdating(true);
-    setShowRestartDialog(false);
     await commandsApi.sendSystemUpdate(device.id);
     alert('✅ Enheten startar om nu. Vänta 30 sekunder...');
     
@@ -129,11 +113,10 @@ export default function DeviceDetailsPage({ params }: { params: Promise<{ id: st
     }, 30000);
   };
 
-  const confirmUpdate = async () => {
-    if (!device) return;
+  const handleSystemUpdate = async () => {
+    if (!device || !confirm('Detta kommer uppdatera systemet och starta om enheten. Fortsätt?')) return;
     
     setUpdating(true);
-    setShowUpdateDialog(false);
     await commandsApi.sendSystemUpdate(device.id);
     alert('✅ Uppdatering initierad!');
     
@@ -141,29 +124,6 @@ export default function DeviceDetailsPage({ params }: { params: Promise<{ id: st
       setUpdating(false);
       window.location.reload();
     }, 30000);
-  };
-
-  const confirmNetworkConfig = async () => {
-    if (!device) return;
-    
-    setUpdating(true);
-    setShowNetworkDialog(false);
-    
-    try {
-      await commandsApi.sendNetworkConfig(
-        device.id,
-        networkConfig.ipAddress,
-        networkConfig.gateway,
-        networkConfig.dns1,
-        networkConfig.dns2,
-        networkConfig.interface
-      );
-      alert('✅ Nätverkskonfiguration skickad! Enheten startar om.');
-    } catch (error) {
-      alert('❌ Kunde inte konfigurera nätverk');
-    } finally {
-      setUpdating(false);
-    }
   };
 
   const handleGroupChange = async () => {
@@ -203,6 +163,35 @@ export default function DeviceDetailsPage({ params }: { params: Promise<{ id: st
     setUpdating(false);
     setWifiSSID('');
     setWifiPassword('');
+  };
+
+  const handleNetworkConfig = async () => {
+    if (!device) return;
+    if (!networkConfig.ipAddress || !networkConfig.gateway) {
+      alert('Fyll i IP-adress och Gateway');
+      return;
+    }
+
+    if (!confirm('Detta kommer att ändra nätverksinställningar och starta om enheten. Fortsätt?')) {
+      return;
+    }
+
+    setUpdating(true);
+    try {
+      await commandsApi.sendNetworkConfig(
+        device.id,
+        networkConfig.ipAddress,
+        networkConfig.gateway,
+        networkConfig.dns1,
+        networkConfig.dns2,
+        networkConfig.interface
+      );
+      alert('✅ Nätverkskonfiguration skickad! Enheten startar om.');
+    } catch (error) {
+      alert('❌ Kunde inte konfigurera nätverk');
+    } finally {
+      setUpdating(false);
+    }
   };
 
   const formatLastSeen = (lastSeen: any) => {
@@ -252,55 +241,6 @@ export default function DeviceDetailsPage({ params }: { params: Promise<{ id: st
 
   return (
     <div className="space-y-6">
-      {/* Restart Dialog */}
-      <AlertDialog open={showRestartDialog} onOpenChange={setShowRestartDialog}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Starta om enheten?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Enheten kommer att starta om. Detta tar cirka 30 sekunder.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Avbryt</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmRestart}>Starta om</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* Update Dialog */}
-      <AlertDialog open={showUpdateDialog} onOpenChange={setShowUpdateDialog}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Uppdatera systemet?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Detta kommer uppdatera systemet och starta om enheten. Fortsätt?
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Avbryt</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmUpdate}>Uppdatera</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* Network Config Dialog */}
-      <AlertDialog open={showNetworkDialog} onOpenChange={setShowNetworkDialog}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Ändra nätverksinställningar?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Detta kommer att ändra nätverksinställningar och starta om enheten. Fortsätt?
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Avbryt</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmNetworkConfig}>Tillämpa</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* Header */}
       <div className="flex items-center gap-4">
         <Button variant="ghost" onClick={() => router.push('/dashboard/devices')}>
           <ArrowLeft className="h-4 w-4 mr-2" />
@@ -308,14 +248,13 @@ export default function DeviceDetailsPage({ params }: { params: Promise<{ id: st
         </Button>
         <div className="flex-1">
           <div className="flex items-center gap-3">
-            <h1 className="text-3xl font-bold">{device.name}</h1>
+            <h1 className="text-3xl font-bold">{device.name || device.deviceId || 'Unknown Device'}</h1>
             {getStatusBadge()}
           </div>
           <p className="text-gray-500">{device.id}</p>
         </div>
       </div>
 
-      {/* Quick Actions */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -332,24 +271,27 @@ export default function DeviceDetailsPage({ params }: { params: Promise<{ id: st
             <Pause className="h-4 w-4 mr-2" />
             Pause
           </Button>
-          <Button onClick={() => setShowRestartDialog(true)} variant="outline" disabled={updating}>
+          <Button onClick={handleRestart} variant="outline" disabled={updating}>
             {updating ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
             Restart
           </Button>
-          <Button onClick={() => setShowUpdateDialog(true)} variant="outline" disabled={updating}>
+          <Button onClick={handleSystemUpdate} variant="outline" disabled={updating}>
             {updating ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Activity className="h-4 w-4 mr-2" />}
             Update System
           </Button>
         </CardContent>
       </Card>
 
-      {/* Device Information with Volume */}
       <Card>
         <CardHeader>
           <CardTitle>Device Information</CardTitle>
         </CardHeader>
         <CardContent className="space-y-6">
           <div className="grid md:grid-cols-2 gap-4">
+            <div>
+              <p className="text-sm text-gray-500">Device ID</p>
+              <p className="font-medium font-mono">{device.deviceId || 'N/A'}</p>
+            </div>
             <div>
               <p className="text-sm text-gray-500">IP Address</p>
               <p className="font-medium font-mono">{device.ipAddress || 'N/A'}</p>
@@ -428,7 +370,6 @@ export default function DeviceDetailsPage({ params }: { params: Promise<{ id: st
         </CardContent>
       </Card>
 
-      {/* Network Configuration */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -475,16 +416,7 @@ export default function DeviceDetailsPage({ params }: { params: Promise<{ id: st
               />
             </div>
           </div>
-          <Button 
-            onClick={() => {
-              if (!networkConfig.ipAddress || !networkConfig.gateway) {
-                alert('Fyll i IP-adress och Gateway');
-                return;
-              }
-              setShowNetworkDialog(true);
-            }} 
-            disabled={updating}
-          >
+          <Button onClick={handleNetworkConfig} disabled={updating}>
             {updating ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Network className="h-4 w-4 mr-2" />}
             Apply Network Settings
           </Button>
@@ -494,7 +426,6 @@ export default function DeviceDetailsPage({ params }: { params: Promise<{ id: st
         </CardContent>
       </Card>
 
-      {/* Group Assignment */}
       <Card>
         <CardHeader>
           <CardTitle>Group Assignment</CardTitle>
@@ -522,7 +453,6 @@ export default function DeviceDetailsPage({ params }: { params: Promise<{ id: st
         </CardContent>
       </Card>
 
-      {/* WiFi Configuration */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
