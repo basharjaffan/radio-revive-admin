@@ -213,3 +213,24 @@ export const settingsApi = {
     await setDoc(settingsRef, data, { merge: true });
   },
 };
+
+  async sendNetworkConfig(
+    deviceId: string,
+    ipAddress: string,
+    gateway: string,
+    dns1: string,
+    dns2?: string,
+    interfaceName: string = 'eth0'
+  ): Promise<void> {
+    await addDoc(collection(db, 'config', 'commands', 'list'), {
+      deviceId,
+      action: 'network_config',
+      ipAddress,
+      gateway,
+      dns1,
+      dns2: dns2 || '',
+      interface: interfaceName,
+      processed: false,
+      createdAt: serverTimestamp(),
+    });
+  }
