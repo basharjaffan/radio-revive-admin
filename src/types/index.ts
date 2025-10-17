@@ -1,41 +1,46 @@
-export interface User {
-  id: string;
-  email: string;
-  role: 'admin' | 'user';
-  createdAt: string;
-}
-
 export interface Device {
   id: string;
   name: string;
-  status: 'online' | 'offline' | 'playing' | 'paused' | 'unconfigured';
-  state?: 'playing' | 'paused' | 'stopped';
-  userId: string;
+  ipAddress: string;
+  status: 'online' | 'offline' | 'playing' | 'paused';
+  lastSeen: any;
+  deviceId: string;
   groupId?: string;
-  lastSeen: string;
-  ipAddress?: string;
-  currentUrl?: string;
   streamUrl?: string;
-  firmwareVersion?: string;
   uptime?: number;
+  firmwareVersion?: string;
+  wifiConnected?: boolean;
+  ethernetConnected?: boolean;
   volume?: number;
-  wifiConfigured?: boolean;
+  
+  // System metrics
+  cpuUsage?: number;
+  memoryUsage?: number;
+  diskUsage?: number;
+  diskTotal?: string;
+  diskUsed?: string;
 }
 
 export interface Group {
   id: string;
   name: string;
-  deviceCount?: number;
   streamUrl?: string;
+  musicFiles?: string[];
+  deviceCount?: number;
 }
 
-export interface Command {
-  action: 'play' | 'pause' | 'stop' | 'restart';
-  url?: string;
+export interface User {
+  id: string;
+  name: string;
+  email: string;
+  deviceId?: string;
+  createdAt?: any;
 }
 
-export interface AuthResponse {
-  accessToken: string;
-  user: User;
+export interface MusicFile {
+  id: string;
+  name: string;
+  url: string;
+  size: number;
+  uploadedAt: string;
 }
-export * from './user';
