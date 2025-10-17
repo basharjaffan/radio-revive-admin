@@ -24,9 +24,13 @@ import {
   Radio,
   Activity,
   Loader2,
+  Volume2,
   Wifi,
   Save,
-  ExternalLink
+  ExternalLink,
+  Cpu,
+  HardDrive,
+  Gauge
 } from 'lucide-react';
 import type { Device, Group } from '@/types';
 import { format } from 'date-fns';
@@ -40,17 +44,20 @@ export default function DeviceDetailsPage({ params }: { params: Promise<{ id: st
   const [updating, setUpdating] = useState(false);
 
   const [selectedGroup, setSelectedGroup] = useState<string>('');
+  const [volume, setVolume] = useState(50);
   const [wifiSSID, setWifiSSID] = useState('');
   const [wifiPassword, setWifiPassword] = useState('');
 
   useEffect(() => {
-    // Subscribe to all devices and filter for this one
     const unsubscribeDevices = devicesApi.subscribe((allDevices) => {
       const currentDevice = allDevices.find(d => d.id === resolvedParams.id);
       if (currentDevice) {
         setDevice(currentDevice);
         if (currentDevice.groupId) {
           setSelectedGroup(currentDevice.groupId);
+        }
+        if (currentDevice.volume !== undefined) {
+          setVolume(currentDevice.volume);
         }
       }
       setLoading(false);
@@ -79,9 +86,16 @@ export default function DeviceDetailsPage({ params }: { params: Promise<{ id: st
     await commandsApi.send(device.id, 'stop');
   };
 
+  const handleVolumeChange = async (newVolume: number) => {
+    if (!device) return;
+    setVolume(newVolume);
+    await commandsApi.send(device.id, 'volume', undefined, newVolume);
+    await devicesApi.update(device.id, { volume: newVolume });
+  };
+
   const handleRestart = async () => {
     if (!device) return;
-    if (!confirm('Är du säker på att du vill starta om enheten? Detta tar ca 30 sekunder.')) return;
+    if (!confirm('Är du säker på att du vill starta om enheten?')) return;
     
     setUpdating(true);
     await commandsApi.sendSystemUpdate(device.id);
@@ -126,7 +140,7 @@ export default function DeviceDetailsPage({ params }: { params: Promise<{ id: st
         }, 1000);
       }
       
-      alert('✅ Grupp uppdaterad! Musik kommer börja spela med ny stream.');
+      alert('✅ Grupp uppdaterad!');
     }
     
     setUpdating(false);
@@ -165,20 +179,25 @@ export default function DeviceDetailsPage({ params }: { params: Promise<{ id: st
     );
   }
 
-  const getStatusBadge = (status: Device['status']) => {
-    const config = {
-      online: { color: 'bg-green-100 text-green-800', label: 'Online' },
-      playing: { color: 'bg-blue-100 text-blue-800', label: 'Playing' },
-      offline: { color: 'bg-red-100 text-red-800', label: 'Offline' },
-      paused: { color: 'bg-yellow-100 text-yellow-800', label: 'Paused' },
-      unconfigured: { color: 'bg-gray-100 text-gray-800', label: 'Unconfigured' },
-    };
-    const { color, label } = config[status];
-    return <Badge className={color}>{label}</Badge>;
+  const getStatusBadge = () => {
+    const isOnline = device.status === 'online' || device.status === 'playing';
+    const isPlaying = device.status === 'playing';
+    
+    return (
+      <div className="flex gap-2">
+        <Badge className={isOnline ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}>
+          {isOnline ? 'Online' : 'Offline'}
+        </Badge>
+        {isPlaying && (
+          <Badge className="bg-blue-100 text-blue-800">Playing</Badge>
+        )}
+      </div>
+    );
   };
 
   return (
     <div className="space-y-6">
+      {/* Header */}
       <div className="flex items-center gap-4">
         <Button variant="ghost" onClick={() => router.push('/dashboard/devices')}>
           <ArrowLeft className="h-4 w-4 mr-2" />
@@ -187,12 +206,13 @@ export default function DeviceDetailsPage({ params }: { params: Promise<{ id: st
         <div className="flex-1">
           <div className="flex items-center gap-3">
             <h1 className="text-3xl font-bold">{device.name}</h1>
-            {getStatusBadge(device.status)}
+            {getStatusBadge()}
           </div>
           <p className="text-gray-500">{device.id}</p>
         </div>
       </div>
 
+      {/* Quick Actions */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -220,15 +240,74 @@ export default function DeviceDetailsPage({ params }: { params: Promise<{ id: st
         </CardContent>
       </Card>
 
+      {/* System Metrics */}
+      <div className="grid gap-4 md:grid-cols-3">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm font-medium">CPU Usage</CardTitle>
+            <Cpu className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{device.cpuUsage?.toFixed(1) || 0}%</div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm font-medium">Memory</CardTitle>
+            <Gauge className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{device.memoryUsage?.toFixed(1) || 0}%</div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm font-medium">Disk</CardTitle>
+            <HardDrive className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{device.diskUsage || 0}%</div>
+            <p className="text-xs text-muted-foreground">
+              {device.diskUsed} / {device.diskTotal}
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Volume Control */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Volume2 className="h-5 w-5" />
+            Volume Control
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Label>Volume</Label>
+              <span className="text-2xl font-bold">{volume}%</span>
+            </div>
+            <input
+              type="range"
+              min="0"
+              max="100"
+              value={volume}
+              onChange={(e) => handleVolumeChange(parseInt(e.target.value))}
+              className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+            />
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Device Information */}
       <Card>
         <CardHeader>
           <CardTitle>Device Information</CardTitle>
         </CardHeader>
         <CardContent className="grid md:grid-cols-2 gap-4">
-          <div>
-            <p className="text-sm text-gray-500">Status</p>
-            <p className="font-medium">{device.status}</p>
-          </div>
           <div>
             <p className="text-sm text-gray-500">IP Address</p>
             <p className="font-medium">{device.ipAddress || 'N/A'}</p>
@@ -247,11 +326,15 @@ export default function DeviceDetailsPage({ params }: { params: Promise<{ id: st
           </div>
           <div>
             <p className="text-sm text-gray-500">Firmware</p>
-            <p className="font-medium">{device.firmwareVersion || 'Unknown'}</p>
+            <p className="font-medium font-mono">{device.firmwareVersion || 'Unknown'}</p>
           </div>
           <div>
-            <p className="text-sm text-gray-500">WiFi</p>
-            <p className="font-medium">{device.wifiConfigured ? 'Yes' : 'No'}</p>
+            <p className="text-sm text-gray-500">Network</p>
+            <div className="flex gap-2">
+              {device.wifiConnected && <Badge variant="outline">WiFi</Badge>}
+              {device.ethernetConnected && <Badge variant="outline">Ethernet</Badge>}
+              {!device.wifiConnected && !device.ethernetConnected && <span className="text-gray-400">Not connected</span>}
+            </div>
           </div>
           <div className="md:col-span-2">
             <p className="text-sm text-gray-500 mb-2">Stream URL</p>
@@ -272,6 +355,7 @@ export default function DeviceDetailsPage({ params }: { params: Promise<{ id: st
         </CardContent>
       </Card>
 
+      {/* Group Assignment */}
       <Card>
         <CardHeader>
           <CardTitle>Group Assignment</CardTitle>
@@ -299,6 +383,7 @@ export default function DeviceDetailsPage({ params }: { params: Promise<{ id: st
         </CardContent>
       </Card>
 
+      {/* WiFi Configuration */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -333,6 +418,7 @@ export default function DeviceDetailsPage({ params }: { params: Promise<{ id: st
         </CardContent>
       </Card>
 
+      {/* System Actions */}
       <Card>
         <CardHeader>
           <CardTitle>System Actions</CardTitle>
