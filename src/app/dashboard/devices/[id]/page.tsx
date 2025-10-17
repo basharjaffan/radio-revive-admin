@@ -47,7 +47,6 @@ export default function DeviceDetailsPage({ params }: { params: Promise<{ id: st
   const [selectedGroup, setSelectedGroup] = useState<string>('');
   const [volume, setVolume] = useState(100);
   
-  // Network settings
   const [networkConfig, setNetworkConfig] = useState({
     ipAddress: '',
     gateway: '',
@@ -88,11 +87,93 @@ export default function DeviceDetailsPage({ params }: { params: Promise<{ id: st
     };
   }, [resolvedParams.id]);
 
+  const handlePlay = async () => {
+    if (!device) return;
+    await commandsApi.send(device.id, 'play', device.streamUrl);
+  };
+
+  const handlePause = async () => {
+    if (!device) return;
+    await commandsApi.send(device.id, 'pause');
+  };
+
+  const handleStop = async () => {
+    if (!device) return;
+    await commandsApi.send(device.id, 'stop');
+  };
+
   const handleVolumeChange = async (newVolume: number) => {
     if (!device) return;
     setVolume(newVolume);
     await commandsApi.send(device.id, 'volume', undefined, newVolume);
     await devicesApi.update(device.id, { volume: newVolume });
+  };
+
+  const handleRestart = async () => {
+    if (!device) return;
+    if (!confirm('Är du säker på att du vill starta om enheten?')) return;
+    
+    setUpdating(true);
+    await commandsApi.sendSystemUpdate(device.id);
+    alert('✅ Enheten startar om nu. Vänta 30 sekunder...');
+    
+    setTimeout(() => {
+      setUpdating(false);
+      window.location.reload();
+    }, 30000);
+  };
+
+  const handleSystemUpdate = async () => {
+    if (!device) return;
+    if (!confirm('Detta kommer uppdatera systemet och starta om enheten. Fortsätt?')) return;
+    
+    setUpdating(true);
+    await commandsApi.sendSystemUpdate(device.id);
+    alert('✅ Uppdatering initierad!');
+    
+    setTimeout(() => {
+      setUpdating(false);
+      window.location.reload();
+    }, 30000);
+  };
+
+  const handleGroupChange = async () => {
+    if (!device || !selectedGroup) return;
+    
+    setUpdating(true);
+    const selectedGroupData = groups.find(g => g.id === selectedGroup);
+    
+    if (selectedGroupData) {
+      await devicesApi.update(device.id, {
+        groupId: selectedGroup,
+        streamUrl: selectedGroupData.streamUrl,
+      });
+      
+      if (device.status === 'playing') {
+        await commandsApi.send(device.id, 'stop');
+        setTimeout(async () => {
+          await commandsApi.send(device.id, 'play', selectedGroupData.streamUrl);
+        }, 1000);
+      }
+      
+      alert('✅ Grupp uppdaterad!');
+    }
+    
+    setUpdating(false);
+  };
+
+  const handleWifiConfig = async () => {
+    if (!device || !wifiSSID || !wifiPassword) {
+      alert('Fyll i både SSID och lösenord');
+      return;
+    }
+    
+    setUpdating(true);
+    await commandsApi.sendWifiConfig(device.id, wifiSSID, wifiPassword);
+    alert('✅ WiFi-konfiguration skickad!');
+    setUpdating(false);
+    setWifiSSID('');
+    setWifiPassword('');
   };
 
   const handleNetworkConfig = async () => {
@@ -116,7 +197,7 @@ export default function DeviceDetailsPage({ params }: { params: Promise<{ id: st
         networkConfig.dns2,
         networkConfig.interface
       );
-      alert('✅ Nätverkskonfiguration skickad! Enheten startar om om 5 sekunder.');
+      alert('✅ Nätverkskonfiguration skickad! Enheten startar om.');
     } catch (error) {
       alert('❌ Kunde inte konfigurera nätverk');
     } finally {
@@ -124,7 +205,15 @@ export default function DeviceDetailsPage({ params }: { params: Promise<{ id: st
     }
   };
 
-  // ... (rest of handlers same as before)
+  const formatLastSeen = (lastSeen: any) => {
+    if (!lastSeen) return 'Never';
+    try {
+      const date = lastSeen.toDate ? lastSeen.toDate() : new Date(lastSeen);
+      return format(date, 'MMM dd, HH:mm:ss');
+    } catch (error) {
+      return 'Invalid date';
+    }
+  };
 
   if (loading) {
     return (
@@ -193,6 +282,34 @@ export default function DeviceDetailsPage({ params }: { params: Promise<{ id: st
           <span className="text-xl font-bold min-w-[50px] text-right">{volume}%</span>
         </div>
       </div>
+
+      {/* Quick Actions */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Radio className="h-5 w-5" />
+            Quick Actions
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="flex gap-3">
+          <Button onClick={handlePlay} disabled={device.status === 'playing'}>
+            <Play className="h-4 w-4 mr-2" />
+            Play
+          </Button>
+          <Button onClick={handlePause} variant="outline" disabled={device.status !== 'playing'}>
+            <Pause className="h-4 w-4 mr-2" />
+            Pause
+          </Button>
+          <Button onClick={handleStop} variant="outline">
+            <Power className="h-4 w-4 mr-2" />
+            Stop
+          </Button>
+          <Button onClick={handleRestart} variant="outline" disabled={updating}>
+            {updating ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+            Restart
+          </Button>
+        </CardContent>
+      </Card>
 
       {/* System Metrics */}
       <div className="grid gap-4 md:grid-cols-3">
@@ -281,13 +398,141 @@ export default function DeviceDetailsPage({ params }: { params: Promise<{ id: st
             {updating ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Network className="h-4 w-4 mr-2" />}
             Apply Network Settings
           </Button>
-          <p className="text-xs text-gray-500">
+          <p className="text-xs text-yellow-600">
             ⚠️ Enheten kommer att starta om efter att nätverksinställningarna tillämpats
           </p>
         </CardContent>
       </Card>
 
-      {/* Rest of the page... */}
+      {/* Device Information */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Device Information</CardTitle>
+        </CardHeader>
+        <CardContent className="grid md:grid-cols-2 gap-4">
+          <div>
+            <p className="text-sm text-gray-500">IP Address</p>
+            <p className="font-medium font-mono">{device.ipAddress || 'N/A'}</p>
+          </div>
+          <div>
+            <p className="text-sm text-gray-500">Last Seen</p>
+            <p className="font-medium">{formatLastSeen(device.lastSeen)}</p>
+          </div>
+          <div>
+            <p className="text-sm text-gray-500">Uptime</p>
+            <p className="font-medium">
+              {device.uptime ? `${Math.floor(device.uptime / 3600)}h ${Math.floor((device.uptime % 3600) / 60)}m` : 'N/A'}
+            </p>
+          </div>
+          <div>
+            <p className="text-sm text-gray-500">Firmware</p>
+            <p className="font-medium font-mono">{device.firmwareVersion || 'Unknown'}</p>
+          </div>
+          <div>
+            <p className="text-sm text-gray-500">Network</p>
+            <div className="flex gap-2">
+              {device.wifiConnected && <Badge variant="outline">WiFi</Badge>}
+              {device.ethernetConnected && <Badge variant="outline">Ethernet</Badge>}
+              {!device.wifiConnected && !device.ethernetConnected && <span className="text-gray-400">Not connected</span>}
+            </div>
+          </div>
+          <div className="md:col-span-2">
+            <p className="text-sm text-gray-500 mb-2">Stream URL</p>
+            {device.streamUrl ? (
+              <a 
+                href={device.streamUrl} 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="text-sm text-blue-600 hover:underline flex items-center gap-2"
+              >
+                {device.streamUrl}
+                <ExternalLink className="h-4 w-4" />
+              </a>
+            ) : (
+              <p className="font-medium">Not configured</p>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Group Assignment */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Group Assignment</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <Label>Assign to Group</Label>
+            <Select value={selectedGroup} onValueChange={setSelectedGroup}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select a group" />
+              </SelectTrigger>
+              <SelectContent>
+                {groups.map((group) => (
+                  <SelectItem key={group.id} value={group.id}>
+                    {group.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <Button onClick={handleGroupChange} disabled={updating || !selectedGroup}>
+            {updating ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
+            Save Group
+          </Button>
+        </CardContent>
+      </Card>
+
+      {/* WiFi Configuration */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Wifi className="h-5 w-5" />
+            WiFi Configuration
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="ssid">SSID</Label>
+            <Input
+              id="ssid"
+              value={wifiSSID}
+              onChange={(e) => setWifiSSID(e.target.value)}
+              placeholder="Network Name"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="password">Password</Label>
+            <Input
+              id="password"
+              type="password"
+              value={wifiPassword}
+              onChange={(e) => setWifiPassword(e.target.value)}
+              placeholder="••••••••"
+            />
+          </div>
+          <Button onClick={handleWifiConfig} disabled={updating || !wifiSSID || !wifiPassword}>
+            {updating ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Wifi className="h-4 w-4 mr-2" />}
+            Configure WiFi
+          </Button>
+        </CardContent>
+      </Card>
+
+      {/* System Actions */}
+      <Card>
+        <CardHeader>
+          <CardTitle>System Actions</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <Button onClick={handleSystemUpdate} variant="outline" className="w-full" disabled={updating}>
+            {updating ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Activity className="h-4 w-4 mr-2" />}
+            Update & Restart System
+          </Button>
+          <p className="text-sm text-gray-500">
+            Pull latest code, update dependencies, and restart.
+          </p>
+        </CardContent>
+      </Card>
     </div>
   );
 }
