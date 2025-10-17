@@ -21,7 +21,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { Users as UsersIcon, Plus, Trash2, Loader2, Mail, User } from 'lucide-react';
+import { Users as UsersIcon, Plus, Trash2, Loader2, Mail, User, Edit2 } from 'lucide-react';
 import type { User, Device } from '@/types';
 
 export default function UsersPage() {
@@ -29,6 +29,7 @@ export default function UsersPage() {
   const [devices, setDevices] = useState<Device[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
+  const [editingUser, setEditingUser] = useState<User | null>(null);
 
   const [formData, setFormData] = useState({
     name: '',
@@ -50,6 +51,16 @@ export default function UsersPage() {
     };
   }, []);
 
+  const handleEdit = (user: User) => {
+    setEditingUser(user);
+    setFormData({
+      name: user.name,
+      email: user.email,
+      deviceId: user.deviceId || 'none',
+    });
+    setShowForm(true);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -59,19 +70,35 @@ export default function UsersPage() {
     }
 
     try {
-      await usersApi.create({
+      const userData = {
         name: formData.name,
         email: formData.email.toLowerCase().trim(),
-        deviceId: formData.deviceId || undefined,
-      });
+        deviceId: formData.deviceId === 'none' ? undefined : formData.deviceId,
+      };
+
+      if (editingUser) {
+        // Update existing user
+        await usersApi.update(editingUser.id, userData);
+        alert('✅ Användare uppdaterad!');
+      } else {
+        // Create new user
+        await usersApi.create(userData);
+        alert('✅ Användare skapad!');
+      }
       
       setFormData({ name: '', email: '', deviceId: '' });
       setShowForm(false);
-      alert('✅ Användare skapad!');
+      setEditingUser(null);
     } catch (error) {
-      console.error('Error creating user:', error);
-      alert('❌ Kunde inte skapa användare');
+      console.error('Error saving user:', error);
+      alert('❌ Kunde inte spara användare');
     }
+  };
+
+  const handleCancel = () => {
+    setFormData({ name: '', email: '', deviceId: '' });
+    setShowForm(false);
+    setEditingUser(null);
   };
 
   const handleDelete = async (userId: string) => {
@@ -101,7 +128,11 @@ export default function UsersPage() {
           <h1 className="text-3xl font-bold">Users</h1>
           <p className="text-gray-500">Manage store users and access</p>
         </div>
-        <Button onClick={() => setShowForm(!showForm)}>
+        <Button onClick={() => {
+          setEditingUser(null);
+          setFormData({ name: '', email: '', deviceId: '' });
+          setShowForm(!showForm);
+        }}>
           <Plus className="h-4 w-4 mr-2" />
           New User
         </Button>
@@ -110,7 +141,7 @@ export default function UsersPage() {
       {showForm && (
         <Card>
           <CardHeader>
-            <CardTitle>Create New User</CardTitle>
+            <CardTitle>{editingUser ? 'Edit User' : 'Create New User'}</CardTitle>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-4">
@@ -140,14 +171,14 @@ export default function UsersPage() {
               <div className="space-y-2">
                 <Label htmlFor="deviceId">Assigned Device (Optional)</Label>
                 <Select 
-                  value={formData.deviceId} 
+                  value={formData.deviceId || 'none'} 
                   onValueChange={(value) => setFormData({ ...formData, deviceId: value })}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Select a device" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">None</SelectItem>
+                    <SelectItem value="none">No device assigned</SelectItem>
                     {devices.map((device) => (
                       <SelectItem key={device.id} value={device.id}>
                         {device.name} ({device.ipAddress})
@@ -158,8 +189,10 @@ export default function UsersPage() {
               </div>
 
               <div className="flex gap-2">
-                <Button type="submit">Create User</Button>
-                <Button type="button" variant="outline" onClick={() => setShowForm(false)}>
+                <Button type="submit">
+                  {editingUser ? 'Update User' : 'Create User'}
+                </Button>
+                <Button type="button" variant="outline" onClick={handleCancel}>
                   Cancel
                 </Button>
               </div>
@@ -180,7 +213,11 @@ export default function UsersPage() {
             <div className="text-center py-12">
               <UsersIcon className="h-12 w-12 mx-auto text-gray-400 mb-4" />
               <p className="text-gray-500 mb-4">No users found</p>
-              <Button onClick={() => setShowForm(true)}>
+              <Button onClick={() => {
+                setEditingUser(null);
+                setFormData({ name: '', email: '', deviceId: '' });
+                setShowForm(true);
+              }}>
                 <Plus className="h-4 w-4 mr-2" />
                 Create First User
               </Button>
@@ -223,13 +260,22 @@ export default function UsersPage() {
                         )}
                       </TableCell>
                       <TableCell className="text-right">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleDelete(user.id)}
-                        >
-                          <Trash2 className="h-4 w-4 text-red-600" />
-                        </Button>
+                        <div className="flex gap-2 justify-end">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleEdit(user)}
+                          >
+                            <Edit2 className="h-4 w-4 text-blue-600" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleDelete(user.id)}
+                          >
+                            <Trash2 className="h-4 w-4 text-red-600" />
+                          </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   );
