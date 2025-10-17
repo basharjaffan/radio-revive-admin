@@ -78,3 +78,4 @@ export default function DashboardLayout({
     </div>
   );
 }
+import Footer from '@/components/Footer';

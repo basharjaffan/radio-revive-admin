@@ -1,0 +1,5 @@
+{
+  "scripts": {
+    "build": "NEXT_PUBLIC_BUILD_DATE=$(date +%Y-%m-%d) next build"
+  }
+}
