@@ -8,7 +8,7 @@ import {
   query,
   orderBy,
   serverTimestamp,
-  Timestamp 
+  getDocs
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import type { Device, Group, User } from '@/types';
@@ -73,18 +73,37 @@ export const groupsApi = {
   }
 };
 
-// Users API
+// Users API - Läser från BÅDA platserna
 export const usersApi = {
   subscribe: (callback: (users: User[]) => void) => {
-    const usersRef = collection(db, 'config', 'users', 'list');
+    // Lyssna på config/users/list
+    const configUsersRef = collection(db, 'config', 'users', 'list');
     
-    return onSnapshot(usersRef, (snapshot) => {
-      const users = snapshot.docs.map(doc => ({
+    const unsubConfig = onSnapshot(configUsersRef, async (configSnapshot) => {
+      const configUsers = configSnapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data()
       })) as User[];
-      callback(users);
+
+      // Hämta också från gamla /users
+      try {
+        const oldUsersRef = collection(db, 'users');
+        const oldSnapshot = await getDocs(oldUsersRef);
+        const oldUsers = oldSnapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        })) as User[];
+
+        // Kombinera båda
+        const allUsers = [...configUsers, ...oldUsers];
+        callback(allUsers);
+      } catch (error) {
+        // Om gamla users inte finns, använd bara config
+        callback(configUsers);
+      }
     });
+
+    return unsubConfig;
   },
 
   create: async (data: Omit<User, 'id'>) => {
@@ -96,13 +115,32 @@ export const usersApi = {
   },
 
   update: async (userId: string, data: Partial<User>) => {
-    const userRef = doc(db, 'config', 'users', 'list', userId);
-    await updateDoc(userRef, data);
+    // Uppdatera i båda platserna
+    try {
+      const configUserRef = doc(db, 'config', 'users', 'list', userId);
+      await updateDoc(configUserRef, data);
+    } catch (error) {
+      // Om inte finns i config, försök gamla platsen
+      const oldUserRef = doc(db, 'users', userId);
+      await updateDoc(oldUserRef, data);
+    }
   },
 
   delete: async (userId: string) => {
-    const userRef = doc(db, 'config', 'users', 'list', userId);
-    await deleteDoc(userRef);
+    // Radera från båda platserna
+    try {
+      const configUserRef = doc(db, 'config', 'users', 'list', userId);
+      await deleteDoc(configUserRef);
+    } catch (error) {
+      console.error('Could not delete from config/users/list');
+    }
+    
+    try {
+      const oldUserRef = doc(db, 'users', userId);
+      await deleteDoc(oldUserRef);
+    } catch (error) {
+      console.error('Could not delete from users');
+    }
   }
 };
 
